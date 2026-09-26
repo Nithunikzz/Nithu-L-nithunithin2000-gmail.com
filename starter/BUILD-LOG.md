@@ -299,6 +299,27 @@ not a code bug.
 
 _What did you decide counts as an auditable event, and what pushed you to that line?_
 
+### 2026-09-26 — prediction before writing `GET /audit`
+
+Proposed with an AI assistant; I reviewed each before committing. The docs say almost nothing
+about audit reads: pagination is only pinned by `check-api.js` (limit 0/-1/99999 -> 400,
+offset -1 -> 400, offset 99999 -> 200, limit 1 and 200 -> 200).
+
+1. `limit` is an integer 1..200, default 50. 0, negative, >200, `abc`, `1.5`, empty -> 400
+   (the tests only pin some of these). `offset` past the end -> 200 with an empty list.
+2. Newest first, ties by id. Offset paging can skip or repeat rows if events arrive between
+   pages. Accepting that rather than building cursors.
+3. Audited: every successful change (one row, in the same transaction as the change) and every
+   403. Not 404s (Phase 4 decision), not 401s, not successful reads.
+4. Failed logins can't be audited: `audit_events.org_id` is NOT NULL and a failed login has no
+   org. The schema rules it out.
+5. A denial row written inside a `db.transaction` that then throws would roll back with it.
+   Predict my routes are safe because every `auditDenials` call runs before the transaction
+   starts. Will test, not assume.
+6. Rows come back with their column names (`result`, `reason_code`), only this org's.
+
+Real guesses: 1 beyond what the tests pin, 4, 5.
+
 ## Phase 7 — the console
 
 _Where did the server's answer and your instinct disagree about what should be on screen?_
