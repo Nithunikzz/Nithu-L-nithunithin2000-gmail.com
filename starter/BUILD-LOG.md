@@ -50,6 +50,33 @@ hides a server misconfiguration as "every token is invalid". Leaving it for now;
 _This is where most people's first model is wrong. Write down the model you started with, the
 observation that broke it, and the model you moved to. Be specific about the observation._
 
+### 2026-09-26 — initial model (prediction, before writing `resolve()`)
+
+Worked this out with an AI assistant after reading PERMISSIONS.md §3–§4 and querying `app.db`
+(roles, role_permissions, permissions, permission_patterns, grants). Committed before any engine
+code so the tests can prove it wrong. I have not read `check-permissions.js` yet.
+
+1. Org-wide deny vs device-scoped allow: deny wins, whatever the scope (§4 D1).
+2. Scope: an org-wide grant (`device_id` NULL) applies to every device question; a grant on
+   device Y does not apply to a question about device X.
+3. Org-level with allow on one device and deny on another (my personalised user: `allow
+   device:reboot` on `dev_p_bb3398_a`, `deny` on `dev_p_bb3398_b`): I predict **allow**, because
+   §3 calls org level "the union across all devices" — resolve each device, allowed if any device
+   allows. Only ~65% sure: the same section says deny wins, and that could mean any deny anywhere
+   kills the org-level answer. This is the one I expect might break.
+4. Wildcards: `device:*` should expand to every row in `permissions` starting `device:`. §4 says
+   "the seven device permissions" and `*` is "all nineteen", but my DB has 8 device permissions
+   and 20 total — the personalised fixture adds `device:reboot`. So expand from the table at
+   runtime, never from a hardcoded list. (Docs vs DB disagreement — note for "Where this repo
+   argues with itself".)
+5. Time windows are half-open, `starts_at <= now < expires_at`: NULL `starts_at` = already
+   active, NULL `expires_at` = no end, `expires_at == now` = expired.
+6. A revoked grant counts for nothing (allow or deny). A suspended member has no permissions at
+   all, not even the role baseline (§3 step 1).
+7. No implication: `device:control` does not give `device:view` (§4 D5).
+
+Only 3 is a real guess; 1, 2, 5, 6, 7 are read from the docs, not discovered.
+
 ## Phase 3 — orgs, members, invites
 
 _Anything you had to work out that no document states. Invite lifecycle states are a common
