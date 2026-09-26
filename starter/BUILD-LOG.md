@@ -28,6 +28,23 @@ failures. I will inspect the token contract first before implementing authentica
 _What did you expect each failure mode to look like before you ran it? Which one behaved
 differently from your expectation, and what did that tell you?_
 
+### 2026-09-26
+
+Implemented `verifyAccessToken()` in `server/auth.js` in the order the stub's TODO lists the rules:
+shape (3 base64url segments) -> JSON objects -> pinned `alg`/`typ` -> HMAC compared with
+`timingSafeEqual` -> `exp <= now` rejected -> `iss`/`aud` -> non-empty `jti`. Every failure throws
+`unauthenticated()` from `http.js`, because `check-jwt.js` asserts the rejection *shape*
+(`401 UNAUTHENTICATED`), not just that something threw.
+
+`node scripts/check-jwt.js`: 0/43 on the stub -> 43/43 on the first run. No failures to chase.
+
+The one line that is not obvious: signature length is checked before `timingSafeEqual`, because
+that function throws a `RangeError` on buffers of different lengths. Without the check, "signature
+truncated" would only become a 401 by accident, via the outer `catch`.
+
+Open: the outer `try/catch` maps *any* error to 401, including a missing/undefined secret. That
+hides a server misconfiguration as "every token is invalid". Leaving it for now; to revisit.
+
 ## Phase 2 — caller context and the resolution engine
 
 _This is where most people's first model is wrong. Write down the model you started with, the
