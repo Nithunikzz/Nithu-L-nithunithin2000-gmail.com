@@ -9,26 +9,20 @@ The categories we look for are listed in `DISCOVERY-BRIEF.md`. The example below
 *shape* of a good entry; it is a recreation of something already printed in `README.md`, so it
 gives nothing away.
 
----
-
-<!-- EXAMPLE — delete this block, keep the shape.
-
-## 2026-03-04 · Phase 0 — orientation
-
-Expected the unknown-permission test to fail on my validation code.
-Observed: it passed, with foreign_keys ON, and *also* passed with the pragma removed — so the
-check was never running, and the "pass" was the schema loading fine while enforcing nothing.
-Changed: moved `foreign_keys = ON` to connection open and re-ran; now it raises
-`FOREIGN KEY constraint failed` as the README said it would.
-Note: this is the failure mode where a passing test is worse than a failing one.
-
--->
 
 ## Phase 0 — orientation
+### 2026-09-26
 
-_Installed, reset the database, read the documents, ran the suites against the untouched skeleton.
-What did the starting line actually look like, and which failure surprised you?_
+Reset the database successfully and confirmed the personalized fixture was loaded, including the
+extra `reviewer` role and `device:reboot` permission.
 
+Ran the untouched skeleton checks before making implementation changes.
+`check-permissions.js` stopped because `permissions.js::resolve()` is still the provided TODO stub.
+`check-jwt.js` reported 0 passed and 43 failed because `verifyAccessToken()` is still a stub.
+`check-api.js` could not get through login: Dana's login returned 404 and the suite aborted afterward.
+
+The starting point is therefore multiple intentional server-side stubs rather than isolated test
+failures. I will inspect the token contract first before implementing authentication.
 ## Phase 1 — token verification
 
 _What did you expect each failure mode to look like before you ran it? Which one behaved
