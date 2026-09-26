@@ -43,6 +43,49 @@ from a user who genuinely can act on another device.
 
 ---
 
+### A device the caller can't view is a 404 on direct access, not a 403
+
+**What I chose:** `visibleDevice()` in `routes/devices.js` returns 404 when `device:view` resolves
+to deny, the same as for a device that is deleted or in another org.
+**Why:** `GET /devices` drops that row entirely. Probed as `viewer@acme.test`:
+`kiosk-lobby-01` is absent from the list and `GET /devices/dev_kiosk_lobby_01` is 404. If direct
+access returned 403, the caller could confirm by id that a device they were never shown exists.
+**What I rejected:** 403 on the grounds that the device is "in your org, you just lack the
+permission". That is the PERMISSIONS.md §5 rule for most resources, but for a device
+`device:view` *is* the visibility question.
+**What would change my mind:** a test expecting 403 for a device denied by `device:view`.
+
+---
+
+### Transferring a device revokes the old org's grants on it
+
+**What I chose:** `POST .../devices/:id/transfer` ends active sessions (`device_transferred`), sets
+`revoked_at` on every live grant in the old org whose `device_id` is this device, and bumps those
+users' `perm_version`, all in one transaction with the move.
+**Why:** after the move those grants name a device that belongs to another org. `resolve()`
+filters grants by `org_id`, so today they would be inert. But they would come back to life if
+the device were ever transferred back. No document says what happens to them.
+**What I rejected:** leaving them in place because they're harmless now. That's harmless only
+until the device returns.
+**What would change my mind:** a spec line or test saying grants survive a round-trip transfer.
+
+---
+
+### Only 403s are audited as denials, not 404s
+
+**What I chose:** `auditDenials()` in `audit.js` writes a `result='deny'` row for an `HttpError`
+with status 403 and ignores everything else.
+**Why:** a 403 is a refused action on a target the caller could see. A 404 means they couldn't
+see it: another org's device, a revoked grant. Writing that target id into this org's log
+would record an id the caller was never entitled to learn. Hand probe: 4 refused grant/transfer
+attempts produced 4 deny rows with reasons (`self_grant`, `missing_permission`, `explicit_deny`).
+**What I rejected:** auditing every non-2xx. It's noisier, and it logs cross-org probing into
+the wrong org's audit trail.
+**What would change my mind:** a requirement to detect cross-org probing. That belongs in a
+separate security log, not in the org's own audit trail.
+
+---
+
 ## Where this repo argues with itself
 
 ### The size of the wildcards

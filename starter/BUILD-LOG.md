@@ -122,6 +122,25 @@ Proposed with an AI assistant; I reviewed each answer before committing. Committ
 5. Token valid but org soft-deleted -> **401**: the membership lookup skips deleted orgs, so
    I'm "not a member". Docs don't say; a real guess.
 
+### 2026-09-26 — caller context: what happened (commit 74ddaef)
+
+Wrote `context.js` + auth routes (login/refresh/token/me) with AI help. Tested the five
+predictions by calling `buildContext` directly on a copy of `app.db`: all five held — wrong org
+404 (also for an org I *am* a member of, and for one that doesn't exist, same body), stale +
+wrong org 401 TOKEN_STALE, suspended 403/`suspended` (tested *without* bumping pv, so context
+catches it even if a suspend route forgets the bump), no org in URL -> token's org, deleted org 401.
+
+The interesting part was `check-api.js`, not my predictions. With only auth routes registered,
+"Acme token against Globex -> 404" **passed** and "no token -> 401" **failed with 404**. Both for
+the same reason: `server/index.js` matches the route before it authenticates, and there was no
+devices route yet, so the router said 404 before `context.js` ever ran. The pass was a false
+positive. It only meant something once `/orgs/:orgId/devices` existed (next commit), when it
+still passed and "no token" flipped to 401.
+
+Smoke test of refresh: rotation works; replaying the old cookie -> 401 and kills the family, so
+the newest cookie is dead too. Unknown email and wrong password give the identical body and
+both run scrypt.
+
 ## Phase 3 — orgs, members, invites
 
 _Anything you had to work out that no document states. Invite lifecycle states are a common
@@ -131,6 +150,23 @@ source of this._
 
 _What happens at the boundary where two grants disagree, or where a grant's scope and the
 question's scope differ? Say what you predicted and what you got._
+
+### 2026-09-26 — devices + grants routes
+
+Wrote `routes/devices.js`, `audit.js`, and `endActiveSessions` in `lifecycle.js` with AI help.
+`check-api.js`: every devices check passes (kiosk-lobby-01 absent for the viewer, Dana's
+one-device control grant). It aborts later at sessions, which don't exist yet, so the grant
+checks never ran. Probed grants by hand against a throwaway server: teleport -> 400
+`unknown_permission` (the FK refuses it, the route only translates the error), self-grant 403,
+past expiry 400 GRANT_EXPIRED, other org's device 404, revoke twice -> 404.
+
+Surprise: an admin granting `device:*` on one device was refused with `missing_permission`, not
+the `explicit_deny` I expected from the org-wide terminal deny I'd just given them. The first
+permission it failed on was `device:reboot`. `device:*` expands (from the table) to 8
+permissions, no role baseline holds the personalised one, and `assertMayGrant` requires the
+caller to hold every expanded permission. So in this DB **nobody, not even an owner, can grant
+`device:*` or `*`**. No-laundering is doing what it says, but no document mentions this
+consequence. Recording it as an observation; I haven't changed anything.
 
 ## Phase 5 — sessions
 
@@ -154,3 +190,10 @@ chose not to build belongs here with its reason._
 
 _Things you know are wrong, unfinished, or that you would do differently with another day. Listing
 these honestly is worth more than pretending they do not exist — we will find them anyway._
+
+- **Duplicate device names are a check-then-insert race.** `routes/devices.js` checks
+  `nameTaken` and then inserts, and there is no unique index behind it (I can't edit
+  `schema.sql`). Two concurrent creates with the same name can both succeed. Not fixed.
+- **Login with no active orgs** returns 200 with `token: null`. The user can't call anything
+  org-scoped. Not decided whether that is right.
+- **`*` / `device:*` can't be granted** in an org with an undocumented permission (Phase 4).
