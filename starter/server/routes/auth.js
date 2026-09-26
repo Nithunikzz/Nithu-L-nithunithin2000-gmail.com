@@ -10,7 +10,7 @@ import {
 } from '../auth.js';
 import { send, unauthenticated, notFound, badRequest } from '../http.js';
 import { newId, nowIso } from '../db.js';
-import { resolve } from '../permissions.js';
+import { resolve, resolveOrgWide } from '../permissions.js';
 
 const COOKIE = 'rt';
 
@@ -139,13 +139,17 @@ export function registerAuthRoutes(router, { db, secret }) {
 
   router.get('/v1/auth/me', (ctx, _params, res) => {
     const user = db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(ctx.userId);
+    // `permissions` is the org-level union (nav cards). `orgWidePermissions` is the stricter
+    // set for entries that name no existing device, e.g. "Add device".
     const { permissions } = resolve(db, { userId: ctx.userId, orgId: ctx.orgId });
+    const { permissions: orgWidePermissions } = resolveOrgWide(db, { userId: ctx.userId, orgId: ctx.orgId });
     send(res, 200, {
       user,
       orgId: ctx.orgId,
       role: ctx.role,
       orgs: publicOrgs(orgsOf(db, ctx.userId)),
       permissions,
+      orgWidePermissions,
     });
   });
 }

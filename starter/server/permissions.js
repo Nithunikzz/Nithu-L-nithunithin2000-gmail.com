@@ -171,6 +171,23 @@ export function assertCan(db, ctx, permission, deviceId = null) {
   return d;
 }
 
+// The org-WIDE set: baseline plus org-wide grants only. Device-scoped grants never count.
+// This is the question for actions that name no existing device — creating a device,
+// receiving a transfer, creating or revoking an org-wide grant. The org-LEVEL union above
+// answers "allowed on at least one device", which is right for showing a nav card but would
+// let a grant on one device authorise an org-wide action. (BUILD-LOG phase 7, prediction 1.)
+export function resolveOrgWide(db, { userId, orgId, now = new Date() }) {
+  const inputs = loadInputs(db, { userId, orgId, now });
+  return { role: roleOf(inputs), permissions: permissionSet(inputs, null, false) };
+}
+
+export function assertCanOrgWide(db, ctx, permission) {
+  const d = resolveOrgWide(db, { userId: ctx.userId, orgId: ctx.orgId }).permissions[permission];
+  if (!d) throw badRequest(`unknown permission ${permission}`);
+  if (d.effect !== 'allow') throw forbidden(`missing ${permission} across the org`, refusalReason(d));
+  return d;
+}
+
 // No privilege laundering: you may only grant authority you hold at that scope.
 //
 // Device-scoped grant: you must hold each permission on that device.

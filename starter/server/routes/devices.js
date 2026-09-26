@@ -7,7 +7,7 @@
 
 import { send, badRequest, notFound, conflict, forbidden, normalizeTs, HttpError } from '../http.js';
 import { newId, nowIso, bumpPermVersion } from '../db.js';
-import { resolve, resolveDevices, assertCan, assertMayGrant } from '../permissions.js';
+import { resolve, resolveDevices, resolveOrgWide, assertCan, assertCanOrgWide, assertMayGrant } from '../permissions.js';
 import { audit, auditDenials } from '../audit.js';
 import { endActiveSessions } from '../lifecycle.js';
 
@@ -67,7 +67,7 @@ export function registerDeviceRoutes(router, { db }) {
   });
 
   router.post('/v1/orgs/:orgId/devices', (ctx, _p, res) => {
-    denyAudited(ctx, 'device.create', 'org', ctx.orgId, () => assertCan(db, ctx, 'device:provision'));
+    denyAudited(ctx, 'device.create', 'org', ctx.orgId, () => assertCanOrgWide(db, ctx, 'device:provision'));
     const name = validName(ctx.body.name);
     const kind = ctx.body.kind;
     if (!KINDS.has(kind)) throw badRequest(`kind must be one of ${[...KINDS].join(', ')}`);
@@ -117,7 +117,9 @@ export function registerDeviceRoutes(router, { db }) {
     if (typeof toOrgId !== 'string') throw badRequest('toOrgId is required');
     if (toOrgId === ctx.orgId) throw badRequest('the device is already in that org');
 
-    const there = resolve(db, { userId: ctx.userId, orgId: toOrgId });
+    // Receiving a device is an org-wide act in the target org: a device-scoped grant there
+    // (on some other device) is not authority to bring a new one in.
+    const there = resolveOrgWide(db, { userId: ctx.userId, orgId: toOrgId });
     if (there.role === null) throw notFound();
 
     denyAudited(ctx, 'device.transfer', 'device', p.deviceId, () => {
@@ -173,7 +175,8 @@ export function registerDeviceRoutes(router, { db }) {
 
     // 403s: no self-grants, no laundering. Audited.
     denyAudited(ctx, 'grant.create', 'user', userId, () => {
-      assertCan(db, ctx, 'grant:create', deviceId);
+      if (deviceId === null) assertCanOrgWide(db, ctx, 'grant:create');
+      else assertCan(db, ctx, 'grant:create', deviceId);
       if (userId === ctx.userId) throw forbidden('you cannot grant to yourself', 'self_grant');
       assertMayGrant(db, ctx, permissions, deviceId);
     });
@@ -211,7 +214,10 @@ export function registerDeviceRoutes(router, { db }) {
   router.delete('/v1/orgs/:orgId/grants/:grantId', (ctx, p, res) => {
     const grant = db.prepare('SELECT * FROM grants WHERE id = ? AND org_id = ? AND revoked_at IS NULL').get(p.grantId, ctx.orgId);
     if (!grant) throw notFound();
-    denyAudited(ctx, 'grant.revoke', 'grant', grant.id, () => assertCan(db, ctx, 'grant:revoke', grant.device_id));
+    denyAudited(ctx, 'grant.revoke', 'grant', grant.id, () =>
+      grant.device_id === null
+        ? assertCanOrgWide(db, ctx, 'grant:revoke')
+        : assertCan(db, ctx, 'grant:revoke', grant.device_id));
 
     db.transaction(() => {
       db.prepare('UPDATE grants SET revoked_at = ? WHERE id = ?').run(nowIso(), grant.id);
