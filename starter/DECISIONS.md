@@ -120,7 +120,37 @@ be an explicit restore, not a side effect.
 
 ---
 
+### Audit pagination is validated at the API boundary, never passed through to SQLite
+
+**What I chose:** `pageParam()` in `routes/orgs.js` accepts only whole numbers written as digits:
+`limit` 1..200 (default 50), `offset` >= 0. Anything else is 400 `invalid_pagination`, checked
+before the query runs. Out-of-range values are rejected, not clamped. Order is `at DESC, id DESC`.
+**Why:** raw SQLite on `audit_events`: `LIMIT -1` returned all 4 Acme rows and `LIMIT 0`
+returned none. So the API's meaning of `limit` would silently be SQLite's. `check-api.js`
+(section "pagination boundaries are defined, not clamped") wants 400 for 0, -1 and 99999, and
+my probe adds `abc`, `1.5`, `+5` and `1e2` -> 400. The `id` tie-break keeps page boundaries
+stable when two events share a timestamp.
+**What I rejected:** passing `limit`/`offset` straight into `LIMIT ? OFFSET ?` (-1 means
+"everything"), and clamping 99999 down to 200, which the test explicitly calls wrong.
+**What would change my mind:** a contract that wants clamping, or cursor pagination. Offset
+paging can skip or repeat rows when events arrive between pages, and I've accepted that.
+
+---
+
 ## Where this repo argues with itself
+
+### The seed loader and the fixture disagree about relative timestamps
+
+- `scripts/load-db.js` `resolveTime()`: "Timestamps in the fixture are RELATIVE ('-2h', '+7d',
+  'now')", parsed with `^([+-])(\d+)([dhm])$`, one unit only.
+- `seed/orgs.json`: `"at": "-2h30m"` (aud_003) and `"endedAt": "-2h55m"` (ses_ended_view).
+
+The loader stored those two raw, and the audit ordering probe found `-2h30m` sorted after every
+real date. I fixed the loader (it's plumbing, not a file the brief forbids editing) to accept a
+run of units, rather than compensating in the audit query. The fixture is the data, and a
+reader shouldn't have to know which rows are malformed. What would change my mind: a rule that
+fixture offsets must be single-unit. Then the fixture is the bug, and the loader should reject
+the value instead of storing it.
 
 ### Can an owner modify another owner?
 

@@ -320,6 +320,38 @@ offset -1 -> 400, offset 99999 -> 200, limit 1 and 200 -> 200).
 
 Real guesses: 1 beyond what the tests pin, 4, 5.
 
+### 2026-09-26 — audit and pagination: what happened (commit 6f621ea)
+
+Wrote `GET /v1/orgs/:orgId/audit` in `routes/orgs.js` with AI help: needs `audit:read`,
+validates `limit` (1..200, default 50) and `offset`, newest first with `id` as tie-breaker,
+returns `{ events, limit, offset, total }`. `check-api.js` now runs to the end: 66/66.
+
+Predictions:
+- 1 held. Beyond what the tests pin: `abc`, `1.5`, empty, `201`, `+5`, `1e2` -> 400; `200` and
+  `01` -> 200; `offset=99999` -> 200 with `events: []`. Raw SQLite on the same table:
+  `LIMIT 0` returns 0 rows, and `LIMIT -1` returns all 4. Handing the query string straight to
+  SQLite would have turned `limit=-1` into "the whole log", so the range check sits before the
+  query.
+- 5 held. Operator reading the log -> 403 and deny rows went 1 -> 2; viewer changing a role ->
+  403 and 2 -> 3. A scan of every route file found no audit-denial call inside a
+  `db.transaction` block, so no denial row can be rolled back.
+- 6 held. The Globex log has 0 rows from other orgs; a Globex token on the Acme audit URL -> 404.
+- 3 and 4 are decisions, not results. 4 stands: failed logins can't be audited because
+  `org_id` is NOT NULL.
+
+**The unexpected part came from the ordering probe (prediction 2).** Two pages with `limit=2`:
+three ISO timestamps, then an event whose `at` was the literal string `-2h30m`. It was 2.5
+hours old but sorted last, because `-` sorts before `2`. Not my route: `resolveTime()` in
+the provided `scripts/load-db.js` matched only single-unit offsets (`^([+-])(\d+)([dhm])$`).
+The fixture also uses compound ones, which fell through as "already absolute ISO" and were
+stored raw: `aud_003.at = "-2h30m"` and `ses_ended_view.ended_at = "-2h55m"`. Fixed the pattern to
+accept a run of units. Fresh load: 0 malformed timestamps, audit order correct, and
+`ses_ended_view` ends between its start and its expiry. Re-ran all four suites (66/43/35/18)
+and reset `app.db`.
+
+I did not anticipate this from the API side. It surfaced only because I looked at the order
+the rows actually came back in, rather than just the status code.
+
 ## Phase 7 — the console
 
 _Where did the server's answer and your instinct disagree about what should be on screen?_
