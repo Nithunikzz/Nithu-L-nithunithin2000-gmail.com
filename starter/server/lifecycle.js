@@ -12,19 +12,71 @@
 //   - a permission change does NOT end a session in flight (grantfathering). Suspension,
 //     membership removal and device transfer DO. See PERMISSIONS.md §7.
 
-import { nowIso } from './db.js';
+import { nowIso, bumpPermVersion } from './db.js';
+import { badRequest, forbidden, lastOwner } from './http.js';
 import { resolve, MODE_PERMISSION } from './permissions.js';
 
-const todo = (name) =>
-  Object.assign(
-    new Error(`TODO: server/lifecycle.js — ${name}() is yours to write (BRIEF.md §3).`),
-    { code: 'NOT_IMPLEMENTED' }
-  );
+// --- modification authority (D8) -------------------------------------------------
+//
+// Ranks are read from `roles`, never from a list in code: the personalised DB has a role
+// (`reviewer`, rank 35) that no document mentions, and it has to slot in by its rank.
 
-export function roleRanks(db) { throw todo('roleRanks'); }
-export function assertRoleExists(db, role) { throw todo('assertRoleExists'); }
-export function assertCanModify(db, callerRole, targetRole) { throw todo('assertCanModify'); }
-export function assertNotLastOwner(db, orgId, userId) { throw todo('assertNotLastOwner'); }
+const OWNER = 'owner';
+
+export function roleRanks(db) {
+  return new Map(db.prepare('SELECT key, rank FROM roles').all().map((r) => [r.key, r.rank]));
+}
+
+export function assertRoleExists(db, role) {
+  if (typeof role !== 'string' || !roleRanks(db).has(role)) throw badRequest('unknown role', 'unknown_role');
+}
+
+// Acting on a member (role change, suspend, reinstate, remove) needs a strictly higher rank.
+// The one exception is owner -> owner: `check-api.js` expects one owner to demote another,
+// while PERMISSIONS.md §6 says equal rank is a 403. See DECISIONS.md.
+export function assertCanModify(db, callerRole, targetRole) {
+  if (callerRole === OWNER && targetRole === OWNER) return;
+  const ranks = roleRanks(db);
+  if (!(ranks.get(callerRole) > ranks.get(targetRole))) {
+    throw forbidden('you cannot modify a member of equal or higher role', 'rank');
+  }
+}
+
+// Conferring a role (role change or invite): strictly below your own, except that only an
+// owner may confer owner.
+export function assertCanAssign(db, callerRole, newRole) {
+  if (newRole === OWNER) {
+    if (callerRole !== OWNER) throw forbidden('only an owner can confer owner', 'rank');
+    return;
+  }
+  const ranks = roleRanks(db);
+  if (!(ranks.get(callerRole) > ranks.get(newRole))) {
+    throw forbidden('you cannot confer a role equal to or above your own', 'rank');
+  }
+}
+
+// Throws LAST_OWNER if taking userId out of active ownership would leave the org with none.
+// Callers run this inside the same transaction as the change, so the count and the write
+// can't be separated by another request.
+export function assertNotLastOwner(db, orgId, userId) {
+  const target = db.prepare('SELECT role, status FROM memberships WHERE org_id = ? AND user_id = ?').get(orgId, userId);
+  if (!target || target.role !== OWNER || target.status !== 'active') return;
+  const others = db.prepare(
+    "SELECT COUNT(*) AS n FROM memberships WHERE org_id = ? AND role = 'owner' AND status = 'active' AND user_id <> ?"
+  ).get(orgId, userId).n;
+  if (others === 0) throw lastOwner();
+}
+
+// Take a member out of the org: removal or leaving. Tenancy event, so it cascades: status,
+// pv (their tokens die), sessions, and — my own policy, not in the docs — their live grants,
+// so a later re-invite does not bring old authority back with it.
+export function removeMembership(db, { orgId, userId }) {
+  db.prepare("UPDATE memberships SET status = 'removed' WHERE org_id = ? AND user_id = ?").run(orgId, userId);
+  bumpPermVersion(db, { orgId, userId });
+  endActiveSessions(db, { orgId, userId, reason: 'membership_removed' });
+  db.prepare('UPDATE grants SET revoked_at = ? WHERE org_id = ? AND user_id = ? AND revoked_at IS NULL')
+    .run(nowIso(), orgId, userId);
+}
 // The one implementation of "these sessions are over". Filters are ANDed; omit one to not
 // filter on it. Returns the number of sessions ended.
 export function endActiveSessions(db, { orgId, userId, deviceId, reason, exceptSessionId }) {

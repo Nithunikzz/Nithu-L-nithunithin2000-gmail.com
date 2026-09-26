@@ -26,14 +26,14 @@ function readCookie(req, name) {
   return null;
 }
 
-function setRefreshCookie(res, raw) {
+export function setRefreshCookie(res, raw) {
   res.setHeader(
     'set-cookie',
     `${COOKIE}=${raw}; HttpOnly; Secure; SameSite=Strict; Path=/v1/auth; Max-Age=${REFRESH_TTL_SECONDS}`
   );
 }
 
-function issueRefresh(db, userId, familyId = newId('fam')) {
+export function issueRefresh(db, userId, familyId = newId('fam')) {
   const raw = newRefreshToken();
   const expiresAt = new Date(Date.now() + REFRESH_TTL_SECONDS * 1000).toISOString();
   db.prepare(
@@ -44,7 +44,7 @@ function issueRefresh(db, userId, familyId = newId('fam')) {
 
 // Every org the user is an active member of. Oldest membership first, so the default org on
 // login is stable.
-function orgsOf(db, userId) {
+export function orgsOf(db, userId) {
   return db.prepare(
     `SELECT o.id, o.name, o.theme, m.role, m.perm_version
        FROM memberships m JOIN organizations o ON o.id = m.org_id
@@ -64,7 +64,7 @@ function tokenFor(db, secret, userId, orgs, orgId) {
   };
 }
 
-const publicOrgs = (orgs) => orgs.map(({ id, name, theme, role }) => ({ id, name, theme, role }));
+export const publicOrgs = (orgs) => orgs.map(({ id, name, theme, role }) => ({ id, name, theme, role }));
 
 export function registerAuthRoutes(router, { db, secret }) {
   router.post('/v1/auth/login', (ctx, _params, res) => {
