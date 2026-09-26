@@ -13,8 +13,10 @@
 
 import { registerAuthRoutes } from './auth.js';
 import { registerDeviceRoutes } from './devices.js';
+import { registerSessionRoutes } from './sessions.js';
 
 export function registerRoutes(router, deps) {
   registerAuthRoutes(router, deps);
   registerDeviceRoutes(router, deps);
+  registerSessionRoutes(router, deps);
 }

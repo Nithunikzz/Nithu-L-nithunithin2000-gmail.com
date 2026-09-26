@@ -13,6 +13,7 @@
 //     membership removal and device transfer DO. See PERMISSIONS.md §7.
 
 import { nowIso } from './db.js';
+import { resolve, MODE_PERMISSION } from './permissions.js';
 
 const todo = (name) =>
   Object.assign(
@@ -37,5 +38,36 @@ export function endActiveSessions(db, { orgId, userId, deviceId, reason, exceptS
     `UPDATE sessions SET state = 'ended', end_reason = ?, ended_at = ? WHERE ${where.join(' AND ')}`
   ).run(reason, now, ...args).changes;
 }
-export function snapshotAuthority(db, { userId, orgId, deviceId }) { throw todo('snapshotAuthority'); }
-export function sessionExpiry(db, orgId) { throw todo('sessionExpiry'); }
+// A session past its TTL still says 'active' until something writes otherwise, and while it
+// does it still holds one_exclusive_session_per_device. Nothing runs in the background, so
+// every path that reads or claims sessions calls this first. ended_at is the moment it
+// actually expired, not the moment we noticed. Filters as in endActiveSessions.
+export function expireSessions(db, { orgId, deviceId, sessionId } = {}) {
+  const where = ["state <> 'ended'", 'expires_at <= ?'];
+  const args = [nowIso()];
+  if (orgId) { where.push('org_id = ?'); args.push(orgId); }
+  if (deviceId) { where.push('device_id = ?'); args.push(deviceId); }
+  if (sessionId) { where.push('id = ?'); args.push(sessionId); }
+  return db.prepare(
+    `UPDATE sessions SET state = 'ended', end_reason = 'session_expired', ended_at = expires_at WHERE ${where.join(' AND ')}`
+  ).run(...args).changes;
+}
+
+// What authorised this session, frozen at start. Sessions are grandfathered: this snapshot,
+// not the live permission set, is the session's authority until it ends (PERMISSIONS.md §7).
+export function snapshotAuthority(db, { userId, orgId, deviceId, mode }) {
+  const { role, permissions } = resolve(db, { userId, orgId, deviceId });
+  const used = ['session:start', MODE_PERMISSION[mode]].map((p) => [p, permissions[p]]);
+  return {
+    role,
+    permissions: Object.fromEntries(used),
+    grantIds: [...new Set(used.map(([, d]) => d.source).filter((s) => s?.startsWith('grant:')).map((s) => s.slice(6)))],
+    snapshotAt: nowIso(),
+  };
+}
+
+// started_at + org.max_session_minutes: the TTL that bounds grandfathered authority.
+export function sessionExpiry(db, orgId) {
+  const { max_session_minutes } = db.prepare('SELECT max_session_minutes FROM organizations WHERE id = ?').get(orgId);
+  return new Date(Date.now() + max_session_minutes * 60_000).toISOString();
+}
