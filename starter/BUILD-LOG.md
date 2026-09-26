@@ -146,6 +146,33 @@ both run scrypt.
 _Anything you had to work out that no document states. Invite lifecycle states are a common
 source of this._
 
+### 2026-09-26 — prediction before writing org/member/invite routes
+
+Proposed with an AI assistant after reading AUTH-DATA-MODEL.md §6–§7, PERMISSIONS.md §6 and §9,
+and the `check-api.js` member/invite checks; I reviewed each before committing. No code yet.
+
+1. Owner demoting another owner: PERMISSIONS.md §6 says equal role -> 403, but `check-api.js`
+   expects Dana (owner) demoting `owner@acme.test` -> 200. Predict owners are the exception:
+   equal rank -> 403 except owner -> owner. (Doc vs test disagreement.)
+2. Rank comes from `roles.rank`, not the documented 5-level order. My DB has `reviewer` at 35.
+   Reviewer holds `user:remove`, so predict reviewer can suspend an operator (30) but not an
+   admin (40).
+3. "A role the inviter could assign": predict strictly below your own rank, except owner can
+   assign owner. An admin cannot invite an admin.
+4. Suspending the last owner -> 409 LAST_OWNER, although §7 only lists it for remove/demote/
+   leave. Otherwise the org's only owner can be suspended and it has no active owner.
+5. Remove member -> `removed`, bump pv, end sessions (`membership_removed`), AND revoke their
+   live grants in that org, so a later re-invite doesn't bring old grants back. Not in the docs.
+6. Re-inviting a removed member: `memberships` is UNIQUE(org_id, user_id), so accept must flip
+   the old row back to active, not insert. Inviting someone active or suspended -> 409.
+7. Invite for an email that already has a user: accept "issues tokens", so whoever holds the
+   invite token would be signed in as that person, and could set their password. Predict
+   accept must never change an existing user's password and must require their current
+   password before issuing tokens. The docs don't cover this.
+8. `DELETE /members/me` must be registered before `/members/:userId`, or `me` is read as an id.
+
+Real guesses: 1, 4, 5, 6, 7.
+
 ## Phase 4 — devices and grants
 
 _What happens at the boundary where two grants disagree, or where a grant's scope and the
@@ -198,6 +225,38 @@ Proposed with an AI assistant after reading PERMISSIONS.md §7, AUTH-DATA-MODEL.
    ended session is still visible via GET.
 
 Real guesses: 2, 3, 4, 8. The rest are mostly read from the docs.
+
+### 2026-09-26 — sessions: #4 was a real bug (commit 420a5fd)
+
+Wrote `routes/sessions.js` with AI help, deliberately *without* any expiry handling first, to
+test prediction 4 before fixing it. Probe on a throwaway DB: owner starts `control` on
+`dev_lab_win_01` (201), I set that session's `expires_at` to 2020, then admin starts `control`
+on the same device -> **409 DEVICE_BUSY**, held by the expired session, whose row still said
+`state: active`. So an abandoned session keeps the device busy forever. Nothing in the
+server ever writes the expiry.
+
+Fix: `expireSessions()` in `lifecycle.js` marks sessions past `expires_at` as ended /
+`session_expired`, with `ended_at = expires_at` (when it expired, not when we noticed). It
+runs before a start (for that device), a list (the org), and a get/stop (that session).
+Same probe after: old row ended/`session_expired`, admin gets 201.
+
+The rest:
+- 1 confirmed: viewer asking for `control` on qa-android (neither permission) ->
+  `missing_permission`. Device with `device:view` denied -> 404 for any mode.
+- 2: 20 rounds of two parallel control requests -> 201+409 all 20 times. That establishes the
+  required outcome (exactly one wins) but **not the mechanism**. The test can't tell
+  synchronous request handling from the unique index. Not claiming either.
+- 3 is a design choice, not a result: sessions are inserted straight as `active` because the
+  index only covers `state = 'active'`.
+- 7 confirmed: someone else's session with `session:view` denied -> 404, same body as a made-up
+  id and as another org's session.
+- 8 confirmed: stop own -> 200 `user_stopped`; stop again -> 409; admin stopping someone else's
+  -> `admin_terminated`.
+- 5 and 6 are untested: `check-api.js` fails "owner demotes Sam" with 404 (no member routes yet).
+
+My own mistake in the probe: "viewer terminates Sam's session" came back 401 TOKEN_STALE,
+because I bumped the viewer's pv mid-script and kept using the old token. It's a test bug,
+not a code bug.
 
 ## Phase 6 — audit
 
