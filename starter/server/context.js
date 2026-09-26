@@ -1,29 +1,55 @@
 // Per-request context: turn a bearer token into an authenticated caller.
 //
-// YOURS TO WRITE. This file ships as a stub so the server boots and every
-// authenticated request fails loudly instead of appearing to work.
+// The order of the checks is the design (BUILD-LOG, phase 2b prediction):
 //
-// What it has to do (BRIEF.md §3, PERMISSIONS.md §6):
-//   - read the bearer token, verify it with verifyAccessToken() from ./auth.js
-//   - look the membership up and refuse a token whose org or membership is gone
-//   - THE TOKEN'S org CLAIM IS THE ONLY ORG THE CALLER MAY ADDRESS. A request that
-//     names a different org is INVISIBLE — 404, never 403. Isolation is structural:
-//     the caller cannot name another org, rather than being filtered afterwards.
-//   - check freshness against memberships.perm_version (AUTH-DATA-MODEL.md §3), so a
-//     role or grant change takes effect on the NEXT request, not at token expiry
-//   - throw through the one error path in ./http.js
+//   1. a bearer token that verifies                      -> else 401 UNAUTHENTICATED
+//   2. a live membership in the token's org              -> else 401 (org deleted, removed)
+//   3. the token's pv matches the membership's            -> else 401 TOKEN_STALE
+//   4. the membership is not suspended                   -> else 403 FORBIDDEN / suspended
+//   5. an org named in the URL IS the token's org         -> else 404 NOT_FOUND
 //
-// authenticate(db, secret) returns (req, params) => caller, where caller carries at
-// least { userId, orgId, role, membership, claims }.
+// 1–4 are facts about the caller's own token and membership. 5 is a plain string compare
+// with the URL: it never looks the named org up, so its answer is the same whether that org
+// exists, belongs to someone else, or is one the caller is also a member of. Isolation is
+// structural — the caller cannot name another org — not a filter applied afterwards.
+//
+// authenticate(db, secret) returns (req, params) => caller.
 
-const todo = () =>
-  Object.assign(
-    new Error('TODO: server/context.js — authenticate() is yours to write (BRIEF.md §3).'),
-    { code: 'NOT_IMPLEMENTED' }
-  );
+import { verifyAccessToken, assertFresh } from './auth.js';
+import { unauthenticated, forbidden, notFound } from './http.js';
+
+const BEARER = /^Bearer\s+(\S+)$/i;
 
 export function authenticate(db, secret) {
-  return function buildContext(req, params) {
-    throw todo();
+  const membershipOf = db.prepare(
+    `SELECT m.id, m.org_id, m.user_id, m.role, m.status, m.perm_version
+       FROM memberships m JOIN organizations o ON o.id = m.org_id
+      WHERE m.org_id = ? AND m.user_id = ? AND o.deleted_at IS NULL`
+  );
+
+  return function buildContext(req, params = {}) {
+    const match = BEARER.exec(req.headers.authorization ?? '');
+    if (!match) throw unauthenticated();
+
+    const claims = verifyAccessToken(match[1], secret);
+
+    const membership = membershipOf.get(claims.org, claims.sub);
+    if (!membership || membership.status === 'removed' || membership.status === 'invited') {
+      throw unauthenticated('not a member of this org');
+    }
+
+    assertFresh(claims, membership);
+
+    if (membership.status === 'suspended') throw forbidden('membership suspended', 'suspended');
+
+    if (params.orgId !== undefined && params.orgId !== claims.org) throw notFound();
+
+    return {
+      userId: claims.sub,
+      orgId: claims.org,
+      role: membership.role,
+      membership,
+      claims,
+    };
   };
 }

@@ -11,7 +11,8 @@
 // The server boots with this file empty: every /v1/* request returns 404 until you
 // register something. That is the intended starting line.
 
+import { registerAuthRoutes } from './auth.js';
+
 export function registerRoutes(router, deps) {
-  const { db, secret } = deps;
-  void db; void secret;
+  registerAuthRoutes(router, deps);
 }
