@@ -86,7 +86,52 @@ separate security log, not in the org's own audit trail.
 
 ---
 
+### Accepting an invite for an existing account requires that account's password
+
+**What I chose:** in `POST /invites/{token}/accept` (`routes/invites.js`), if the invite's email
+already has a user, the request must carry that user's current password (`verifyPassword`)
+before a membership is attached or tokens are issued. Their name and password are never
+changed. Wrong password -> 401, and the invite stays usable.
+**Why:** this is my resolution of a gap, not a documented rule. AUTH-DATA-MODEL.md §6 says accept
+"upserts the user … and issues tokens". Taken literally, whoever holds the invite token is signed
+in as the existing person, and could set their password. Probe: accepting an invite for
+`sam@example.test` with `attackerpass` -> 401; with Sam's real password -> 200; Sam's name and
+login unchanged, still one user row.
+**What I rejected:** (a) the literal reading, which is account takeover by invite link;
+(b) attaching the membership without issuing tokens. That's safe, but it drops the documented
+"issue tokens", and it still lets a token holder add someone to an org without their consent.
+**What would change my mind:** a spec statement that invite emails are verified out of band and
+the token is meant to authenticate. Even then I'd keep "never overwrite an existing password".
+
+---
+
+### Removing a member also revokes their grants in that org
+
+**What I chose:** `removeMembership()` in `lifecycle.js` sets `revoked_at` on the user's live grants
+in that org, alongside the documented status change, pv bump and session end.
+**Why:** a removed member can be re-invited, and accept reuses the same membership row
+(UNIQUE(org_id, user_id)). Without the revoke, their old grants would silently apply again.
+Probe: removed viewer with a `device:control` grant, re-invited as operator: the grant stayed
+revoked.
+**What I rejected:** leaving grants in place because `resolve()` ignores non-active members. True
+while they're removed, wrong the moment they come back.
+**What would change my mind:** a requirement that rehiring restores prior access. Then it should
+be an explicit restore, not a side effect.
+
+---
+
 ## Where this repo argues with itself
+
+### Can an owner modify another owner?
+
+- PERMISSIONS.md §6: "modify a user of equal role (admin -> admin) | `403`".
+- `check-api.js`: "demoting a NON-last owner is allowed": Dana (owner) demotes `owner@acme.test`
+  (owner) -> expects 200.
+
+Built against the test: `assertCanModify` in `lifecycle.js` requires a strictly higher rank, with
+one exception, owner -> owner. Probe: admin -> admin 403, owner -> owner 200. The reason to side
+with the test: owner is the top rank, so under the strict rule nobody could ever demote or
+remove an owner, and a second owner could never be taken out of the org.
 
 ### The size of the wildcards
 

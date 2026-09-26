@@ -173,6 +173,43 @@ and the `check-api.js` member/invite checks; I reviewed each before committing. 
 
 Real guesses: 1, 4, 5, 6, 7.
 
+### 2026-09-26 — orgs/members/invites: what happened
+
+Wrote `routes/orgs.js`, `routes/invites.js` and the rank/last-owner/removal rules in
+`lifecycle.js` with AI help. For 7 I chose "require the existing user's current password"
+over following the doc literally or attaching without tokens.
+
+`check-api.js` now passes everything up to `/audit` (Phase 6, not written). That includes
+grandfathering and the suspension cascade, so **Phase 5 predictions 5 and 6 finally ran and
+held**: Sam's session survived his demotion, his next request was 401 TOKEN_STALE, suspension
+ended it with `user_suspended`, and reinstating did not bring it back.
+
+Probed the eight predictions on a throwaway server:
+- 1: admin -> admin 403 `rank`, owner -> owner 200. The doc says equal rank is 403; the test
+  wants owner -> owner allowed. Built what the test expects (DECISIONS.md).
+- 2, 3: ranks come from the table. Reviewer (35) can invite and suspend an operator (30) but
+  gets 403 for an admin (40). Admin can't invite admin or owner; owner can invite owner.
+- 4 was **wrong about what's reachable**. The last-owner guard on suspend/demote can never fire
+  through the API: only an owner can modify an owner, and nobody can suspend or demote
+  themselves, so whoever does it is always another active owner. LAST_OWNER is only reachable
+  by the last owner leaving (`DELETE /members/me` -> 409). Kept the guard as defence in depth.
+- 5: removal ended the viewer's session (`membership_removed`), revoked their grant, and their
+  old token got 401.
+- 6: re-inviting the removed viewer reused their single membership row (still 1 row, now
+  operator); the old grant stayed revoked.
+- 7: wrong password -> 401 and the invite is still usable; right password -> 200; Sam's name
+  and password unchanged; still one user row with his email.
+- 8: `/members/me` works; the sole owner leaving gets LAST_OWNER.
+- Two parallel accepts of one invite -> 200 + 409.
+
+Not test-first, unlike the session bug: while writing invite creation I noticed that an
+expired-but-never-cancelled invite is still "live" to `one_live_invite_per_email`
+(`WHERE accepted_at IS NULL AND revoked_at IS NULL`, no expiry), so that email could never be
+invited again. I wrote the fix (retire expired invites before inserting) first, and only
+afterwards confirmed the bug with raw SQL: a second insert with the expired one present ->
+`UNIQUE constraint failed: invites.org_id, invites.email`. Through the API, re-invite after
+expiry -> 201.
+
 ## Phase 4 — devices and grants
 
 _What happens at the boundary where two grants disagree, or where a grant's scope and the
@@ -282,3 +319,7 @@ these honestly is worth more than pretending they do not exist — we will find 
 - **Login with no active orgs** returns 200 with `token: null`. The user can't call anything
   org-scoped. Not decided whether that is right.
 - **`*` / `device:*` can't be granted** in an org with an undocumented permission (Phase 4).
+- **No `invited` membership rows.** AUTH-DATA-MODEL.md §6 says accept flips the membership "from
+  `invited` to `active`", but for a brand-new email there is no user row for an `invited`
+  membership to point at (`memberships.user_id` is NOT NULL, FK to users). Accept creates the
+  membership, or reactivates a removed one, instead. Nothing ever writes status `invited`.
