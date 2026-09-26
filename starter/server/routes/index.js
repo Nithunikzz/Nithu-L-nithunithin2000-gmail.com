@@ -12,7 +12,9 @@
 // register something. That is the intended starting line.
 
 import { registerAuthRoutes } from './auth.js';
+import { registerDeviceRoutes } from './devices.js';
 
 export function registerRoutes(router, deps) {
   registerAuthRoutes(router, deps);
+  registerDeviceRoutes(router, deps);
 }

@@ -12,6 +12,8 @@
 //   - a permission change does NOT end a session in flight (grantfathering). Suspension,
 //     membership removal and device transfer DO. See PERMISSIONS.md §7.
 
+import { nowIso } from './db.js';
+
 const todo = (name) =>
   Object.assign(
     new Error(`TODO: server/lifecycle.js — ${name}() is yours to write (BRIEF.md §3).`),
@@ -22,6 +24,18 @@ export function roleRanks(db) { throw todo('roleRanks'); }
 export function assertRoleExists(db, role) { throw todo('assertRoleExists'); }
 export function assertCanModify(db, callerRole, targetRole) { throw todo('assertCanModify'); }
 export function assertNotLastOwner(db, orgId, userId) { throw todo('assertNotLastOwner'); }
-export function endActiveSessions(db, { orgId, userId, deviceId, reason, exceptSessionId }) { throw todo('endActiveSessions'); }
+// The one implementation of "these sessions are over". Filters are ANDed; omit one to not
+// filter on it. Returns the number of sessions ended.
+export function endActiveSessions(db, { orgId, userId, deviceId, reason, exceptSessionId }) {
+  const where = ["state <> 'ended'", 'org_id = ?'];
+  const args = [orgId];
+  if (userId) { where.push('user_id = ?'); args.push(userId); }
+  if (deviceId) { where.push('device_id = ?'); args.push(deviceId); }
+  if (exceptSessionId) { where.push('id <> ?'); args.push(exceptSessionId); }
+  const now = nowIso();
+  return db.prepare(
+    `UPDATE sessions SET state = 'ended', end_reason = ?, ended_at = ? WHERE ${where.join(' AND ')}`
+  ).run(reason, now, ...args).changes;
+}
 export function snapshotAuthority(db, { userId, orgId, deviceId }) { throw todo('snapshotAuthority'); }
 export function sessionExpiry(db, orgId) { throw todo('sessionExpiry'); }
