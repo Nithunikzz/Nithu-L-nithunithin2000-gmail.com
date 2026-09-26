@@ -356,6 +356,33 @@ the rows actually came back in, rather than just the status code.
 
 _Where did the server's answer and your instinct disagree about what should be on screen?_
 
+### 2026-09-26 — prediction before writing any console code
+
+Proposed with an AI assistant after reading UI-INVENTORY.md and all 25 tests in
+`tests/ui.spec.js`; I reviewed each before committing. `web/` is still the placeholder.
+Setup facts: Playwright runs the server in production mode, which serves `dist/`, but `dist/`
+doesn't exist and the `test` script doesn't build it (the config comment says "`npm test`
+builds the SPA first"). Chromium for Playwright isn't installed yet.
+
+1. Existing server bug suspected: nav and "Add device" use the org-level union. A user whose
+   only `device:provision` is a grant on one device gets org-level allow, so the button would
+   appear. `POST /devices` uses the same org-level `assertCan`, so the API would let them create
+   devices on the strength of a one-device grant. Test before fixing.
+2. The first Playwright run fails everything until `npm run build`.
+3. A reload goes back to the default (oldest-membership) org, because nothing may be stored
+   client-side. The test only reloads on Acme, so it passes regardless. An org in the URL
+   would survive a reload without storage.
+4. `GET /grants` returns revoked grants too, so the console must list only live ones, or row
+   counts break after any revoke.
+5. The "server withdraws the permission" test means no caching of the device list across
+   navigation: each visit refetches.
+6. Invite page: after my Phase 3 decision, an existing account needs its password, so the page
+   must show the server's 401 reason. The test only covers a new account.
+7. Theme colours are keyed by theme name in CSS. That's presentation, not a permission table.
+   A new org's theme needs a colour too, or "switching orgs changes the background" fails.
+
+Real guesses: 1, 3, 4, 6.
+
 ## Phase 8 — hardening
 
 _What did you measure, what did you fix, and what did you deliberately leave alone? Anything you
