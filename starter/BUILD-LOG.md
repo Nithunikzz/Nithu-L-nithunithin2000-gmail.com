@@ -173,6 +173,32 @@ consequence. Recording it as an observation; I haven't changed anything.
 _Two permissions, one device. What did you have to resolve, and in what order, to keep the two
 failure reasons distinguishable?_
 
+### 2026-09-26 — prediction before writing the session routes
+
+Proposed with an AI assistant after reading PERMISSIONS.md §7, AUTH-DATA-MODEL.md §9 and the
+`sessions` schema; I reviewed each before committing. No session code exists yet.
+
+1. `POST /sessions` order: device visible (404) -> `session:start` (403 `missing_permission`)
+   -> mode permission (403 `missing_device_permission`) -> exclusivity (409 DEVICE_BUSY). Both
+   missing -> `missing_permission`: "you can't open sessions at all" outranks "not here".
+2. Race: I predict a check-then-insert would NOT actually race in this server. better-sqlite3 is
+   synchronous and the handler never awaits between check and insert, so Node can't interleave
+   two requests there. Relying on the unique index anyway (it also holds across processes) and
+   translating its error to 409.
+3. The index `one_exclusive_session_per_device` only covers `state = 'active'`, so a session
+   inserted as `connecting` would not be protected. Insert straight as `active`.
+4. A session past `expires_at` still says `active` until something changes it, so it still
+   holds the unique index. Predict a real bug: an abandoned control session keeps the device
+   busy forever, unless expired sessions are marked `session_expired` before inserting.
+5. After Sam is demoted, his running session stays active, and his next request is 401
+   TOKEN_STALE (the demotion bumps pv), not 403.
+6. Suspension ends his session (`user_suspended`); reinstating does not bring it back.
+7. Reading someone else's session without `session:view` -> 404, same reasoning as devices.
+8. Stopping an already-ended session -> 409 CONFLICT, not 404: unlike a revoked grant, an
+   ended session is still visible via GET.
+
+Real guesses: 2, 3, 4, 8. The rest are mostly read from the docs.
+
 ## Phase 6 — audit
 
 _What did you decide counts as an auditable event, and what pushed you to that line?_
