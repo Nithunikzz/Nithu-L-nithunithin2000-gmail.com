@@ -70,13 +70,54 @@ export function issueAccessToken({ userId, orgId, role, permVersion }, secret) {
 // AUTH-DATA-MODEL.md §10 lists the failure modes; §2 defines the claim set.
 // `node scripts/check-jwt.js` is the public test suite for this function.
 // ---------------------------------------------------------------------------
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
+
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
 export function verifyAccessToken(token, secret) {
-  // YOURS TO WRITE. Every failure mode listed above must be a 401 UNAUTHENTICATED.
-  // `node scripts/check-jwt.js` is the public suite for this function.
-  throw Object.assign(
-    new Error('TODO: server/auth.js — verifyAccessToken() is yours to write (AUTH-DATA-MODEL.md §10).'),
-    { code: 'NOT_IMPLEMENTED' }
-  );
+  try {
+    // 1. Exactly three segments, each non-empty base64url.
+    if (typeof token !== 'string') throw unauthenticated();
+    const parts = token.split('.');
+    if (parts.length !== 3 || !parts.every((s) => BASE64URL.test(s))) throw unauthenticated();
+    const [encodedHeader, encodedPayload, encodedSignature] = parts;
+
+    // 2. Header and payload must be base64url-encoded JSON objects.
+    let header, claims;
+    try {
+      header = JSON.parse(unb64(encodedHeader).toString('utf8'));
+      claims = JSON.parse(unb64(encodedPayload).toString('utf8'));
+    } catch {
+      throw unauthenticated();
+    }
+    if (!isPlainObject(header) || !isPlainObject(claims)) throw unauthenticated();
+
+    // 3. Pin the algorithm and type — never let the header choose.
+    if (header.alg !== ALG || header.typ !== 'JWT') throw unauthenticated();
+
+    // 4. Signature, compared in constant time. timingSafeEqual throws on a length
+    //    mismatch, so check length first to keep a truncated signature a 401.
+    const expected = createHmac('sha256', secret).update(`${encodedHeader}.${encodedPayload}`).digest();
+    const actual = unb64(encodedSignature);
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw unauthenticated();
+
+    // 5. exp must be a finite number strictly in the future (<= now is expired).
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof claims.exp !== 'number' || !Number.isFinite(claims.exp) || claims.exp <= now) {
+      throw unauthenticated();
+    }
+
+    // 6. Issuer and audience must be ours.
+    if (claims.iss !== ISS || claims.aud !== AUD) throw unauthenticated();
+
+    // 7. jti must be a non-empty string.
+    if (typeof claims.jti !== 'string' || claims.jti.length === 0) throw unauthenticated();
+
+    return claims;
+  } catch (err) {
+    if (err?.code === 'UNAUTHENTICATED') throw err;
+    throw unauthenticated();
+  }
 }
 
 
