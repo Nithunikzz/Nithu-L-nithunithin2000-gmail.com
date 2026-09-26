@@ -77,6 +77,29 @@ code so the tests can prove it wrong. I have not read `check-permissions.js` yet
 
 Only 3 is a real guess; 1, 2, 5, 6, 7 are read from the docs, not discovered.
 
+### 2026-09-26 — engine written, what the tests said
+
+Wrote `server/permissions.js` from the model above (with AI help; I went through each function
+before committing): `expand()` reads wildcards against the `permissions` table, `loadInputs()`
+does 3 queries (membership, baseline, live grants — revoked/out-of-window/deleted-device grants
+are dropped in SQL), `decide()` is deny grant -> role -> allow grant -> implicit.
+
+`check-permissions.js` 35/35, `check-personalisation.js` 18/18, first run. Nothing in the
+public suites contradicted the model — so this is "not disproved yet", not "confirmed".
+
+Q3 is still open. I expected the personalisation suite to settle it, but it only *computes*
+`orgWide = resolve(db, ctx)` (line 48) and never asserts on it. My engine gives
+`device:reboot` = allow on `dev_p_bb3398_a`, deny/explicit_deny on `_b`, and **allow** at org
+level (source `grant:grt_p_bb3398_allow`). Sam's `device:terminal` at org level is still
+deny/explicit_deny — the org-wide deny applies to every device, so the union is empty. Kept
+the union reading; it is probably in the hidden tier.
+
+Choice I made while writing it: `assertMayGrant` does NOT use the org-level union. For an
+org-wide grant the caller must hold the permission with no deny on any device. See DECISIONS.md.
+
+Unsettled: a device-scoped grant of a non-device permission (e.g. `audit:read` on one device)
+currently counts at org level through the union. No document says what that should mean.
+
 ## Phase 3 — orgs, members, invites
 
 _Anything you had to work out that no document states. Invite lifecycle states are a common
