@@ -100,6 +100,28 @@ org-wide grant the caller must hold the permission with no deny on any device. S
 Unsettled: a device-scoped grant of a non-device permission (e.g. `audit:read` on one device)
 currently counts at org level through the union. No document says what that should mean.
 
+### 2026-09-26 — caller context: prediction before writing `context.js`
+
+Proposed with an AI assistant; I reviewed each answer before committing. Committed before any
+`context.js` code.
+
+1. Token for Acme, URL names Globex -> **404**, and still 404 if I am also a Globex member. The
+   access token is scoped to exactly one org; switching means minting a new token
+   (`POST /v1/auth/token`).
+2. Stale token AND wrong org -> **401 TOKEN_STALE**: freshness first, isolation second. Neither
+   answer leaks anything about the other org, as long as the isolation step is a plain compare
+   of `claims.org` with the URL and never looks the URL's org up. A stale token gets no answer at
+   all; after refreshing, the retry gets the 404.
+3. Suspended member, fresh token -> **403 FORBIDDEN, reason `suspended`**, refused in the context
+   layer, not left to `resolve()`, or routes that need no permission (`/auth/me`, leaving the
+   org) would keep working for a suspended user. Not a clean prediction: early on I saw a line
+   in the organiser README naming suspension on ungated routes as a test area.
+4. No org in the URL: `/sessions/:id` acts in the token's org (another org's session -> 404);
+   `GET /v1/orgs` lists every org I'm an active member of (discovery, not acting in them);
+   `/auth/me` reports the token's org.
+5. Token valid but org soft-deleted -> **401**: the membership lookup skips deleted orgs, so
+   I'm "not a member". Docs don't say; a real guess.
+
 ## Phase 3 — orgs, members, invites
 
 _Anything you had to work out that no document states. Invite lifecycle states are a common
