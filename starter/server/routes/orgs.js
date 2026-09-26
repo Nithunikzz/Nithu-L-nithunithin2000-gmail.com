@@ -213,6 +213,37 @@ export function registerOrgRoutes(router, { db }) {
     send(res, 200, { userId: p.userId, status: 'removed' });
   });
 
+  // --- audit -----------------------------------------------------------------
+
+  // Pagination is validated, never clamped and never handed to SQLite raw: `LIMIT -1` in
+  // SQLite means "no limit", so an unchecked -1 would return the whole log.
+  const AUDIT_DEFAULT_LIMIT = 50;
+  const AUDIT_MAX_LIMIT = 200;
+  const DIGITS = /^\d+$/;
+
+  function pageParam(query, name, fallback, min, max) {
+    const raw = query.get(name);
+    if (raw === null) return fallback;
+    if (!DIGITS.test(raw)) throw badRequest(`${name} must be a whole number`, 'invalid_pagination');
+    const n = Number(raw);
+    if (n < min || n > max) throw badRequest(`${name} must be between ${min} and ${max}`, 'invalid_pagination');
+    return n;
+  }
+
+  router.get('/v1/orgs/:orgId/audit', (ctx, _p, res) => {
+    guarded(ctx, 'audit.read', 'org', ctx.orgId, () => assertCan(db, ctx, 'audit:read'));
+    const limit = pageParam(ctx.query, 'limit', AUDIT_DEFAULT_LIMIT, 1, AUDIT_MAX_LIMIT);
+    const offset = pageParam(ctx.query, 'offset', 0, 0, Number.MAX_SAFE_INTEGER);
+
+    // Newest first; id breaks ties so a page boundary never falls between equal timestamps
+    // in a different order on the next request.
+    const events = db.prepare(
+      'SELECT * FROM audit_events WHERE org_id = ? ORDER BY at DESC, id DESC LIMIT ? OFFSET ?'
+    ).all(ctx.orgId, limit, offset);
+    const total = db.prepare('SELECT COUNT(*) AS n FROM audit_events WHERE org_id = ?').get(ctx.orgId).n;
+    send(res, 200, { events, limit, offset, total });
+  });
+
   // --- effective permissions -------------------------------------------------
 
   // user:read, or yourself. Resolved in the token's org, so the same user id gives a

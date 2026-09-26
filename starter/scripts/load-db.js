@@ -23,10 +23,13 @@ const seed = JSON.parse(readFileSync(here('../seed/orgs.json'), 'utf8'));
 // goes stale and seeded grants never silently expire.
 function resolveTime(value) {
   if (value === null || value === undefined) return null;
-  const m = /^([+-])(\d+)([dhm])$/.exec(value);
+  // Compound offsets ('-2h30m') occur in the fixture too. The original single-unit pattern let
+  // them fall through as raw strings, which then sort before every ISO date.
+  const m = /^([+-])((?:\d+[dhm])+)$/.exec(value);
   if (!m) return value; // already absolute ISO-8601
-  const unit = { d: 864e5, h: 36e5, m: 6e4 }[m[3]];
-  return new Date(Date.now() + (m[1] === '-' ? -1 : 1) * Number(m[2]) * unit).toISOString();
+  const units = { d: 864e5, h: 36e5, m: 6e4 };
+  const ms = [...m[2].matchAll(/(\d+)([dhm])/g)].reduce((sum, [, n, u]) => sum + Number(n) * units[u], 0);
+  return new Date(Date.now() + (m[1] === '-' ? -1 : 1) * ms).toISOString();
 }
 
 // The fixture stores the password in plaintext on purpose. Hash it HERE — never copy
