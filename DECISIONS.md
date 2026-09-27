@@ -171,6 +171,44 @@ org, or that allows storage for non-secret UI state.
 
 ---
 
+## Tools, libraries and sources used
+
+The submission rules ask for anything taken from a library, blog post or tool to be cited here.
+
+**AI assistant: Claude Code (Anthropic).** Used throughout, as the brief permits
+("use whatever you like"). What it did:
+- proposed the predictions in each phase; I reviewed them and committed them before any code
+  for that phase (each BUILD-LOG prediction entry says so);
+- wrote most of the code and the probe/measurement scripts, which I read and ran;
+- drafted BUILD-LOG and DECISIONS entries from what the tests and probes actually showed,
+  which I reviewed and committed;
+- ran the "break it" drills with me before submission (reverting fixes one at a time to see
+  which tests catch them).
+
+Every BUILD-LOG entry written this way says "with AI help". The reasoning I defend is recorded
+in the entries themselves, and the drills are how I checked I could.
+
+**Organiser material in the hand-out.** The public starter (`rhinostream/Hackathons`) ships
+`DISCOVERY-RUBRIC.md`, `q1-starter/`, `HARDENING.md` and `tools/` at the repo root. None of it
+was used to write this code. What was seen, all at the very start while checking the AI-use
+policy: two sections of the root README and HARDENING.md (one idea from them, "suspension on
+ungated routes", is flagged in BUILD-LOG phase 2); the first three lines of
+DISCOVERY-RUBRIC.md; four lines of `q1-starter/server/auth.js` (after my verifier already passed
+43/43). In phase 2 my `permissions.js` was compared with the reference file only by `diff -q`,
+which reports "different" without showing content.
+
+**Libraries**, all already in the starter's `package.json`, none added:
+- `better-sqlite3`: the database driver (every query).
+- `node:crypto` (built in): HMAC-SHA256 and `timingSafeEqual` in `verifyAccessToken`; `scrypt`
+  (provided `hashPassword`/`verifyPassword`), random tokens.
+- `react`, `react-dom`: the console in `web/`.
+- `vite`, `@vitejs/plugin-react`: building and serving the console.
+- `@playwright/test`: the shipped UI suite, plus throwaway specs for the phase 7 checks.
+
+**No blog posts, public solutions or other teams' code** were used.
+
+---
+
 ## Where this repo argues with itself
 
 ### The seed loader and the fixture disagree about relative timestamps

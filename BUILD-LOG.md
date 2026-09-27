@@ -566,6 +566,19 @@ Final, after both fixes: JWT 43/43, permissions 35/35, personalisation 18/18, AP
 Playwright 25/25. Measuring tool (preload + scaler + driver) lives outside the repo; its
 method is described above.
 
+### 2026-09-27 — moved the write-up to the repo root
+
+The submission email says `BUILD-LOG.md` and `DECISIONS.md` "must be committed at the repository
+root". Mine were in `starter/`, where the templates shipped. Moved both with `git mv` as a commit
+with no content changes, so it's a pure rename and `git log --follow -- BUILD-LOG.md` still
+reaches the first entry. `starter/WRITE-UP.md` points here. The same email asks for tools to be
+cited in DECISIONS.md, and it had no such section, so I added "Tools, libraries and sources
+used", including what was seen of the organiser files shipped in the public starter.
+
+Checked a fresh clone of the public repo the way a grader would run it:
+`cd starter && npm install && npm run db:reset && npm run build && npm start` -> page 200, and
+Dana can log in.
+
 ## Open threads
 
 _Things you know are wrong, unfinished, or that you would do differently with another day. Listing
