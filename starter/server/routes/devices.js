@@ -146,12 +146,17 @@ export function registerDeviceRoutes(router, { db }) {
 
   // --- grants ----------------------------------------------------------------
 
-  const grantJson = (g) => ({
+  const grantJson = (g, permissions) => ({
     id: g.id, userId: g.user_id, deviceId: g.device_id, effect: g.effect,
-    permissions: db.prepare('SELECT permission FROM grant_permissions WHERE grant_id = ? ORDER BY permission').all(g.id).map((r) => r.permission),
+    permissions,
     startsAt: g.starts_at, expiresAt: g.expires_at, revokedAt: g.revoked_at,
     createdBy: g.created_by, createdAt: g.created_at,
   });
+
+  const oneGrantJson = (id) => grantJson(
+    db.prepare('SELECT * FROM grants WHERE id = ?').get(id),
+    db.prepare('SELECT permission FROM grant_permissions WHERE grant_id = ? ORDER BY permission').all(id).map((r) => r.permission),
+  );
 
   router.post('/v1/orgs/:orgId/grants', (ctx, _p, res) => {
     const { userId, deviceId = null, effect, permissions } = ctx.body;
@@ -198,16 +203,25 @@ export function registerDeviceRoutes(router, { db }) {
       if (err?.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') throw badRequest('unknown permission', 'unknown_permission');
       throw err;
     }
-    send(res, 201, grantJson(db.prepare('SELECT * FROM grants WHERE id = ?').get(id)));
+    send(res, 201, oneGrantJson(id));
   });
 
   router.get('/v1/orgs/:orgId/grants', (ctx, _p, res) => {
     denyAudited(ctx, 'grant.list', 'org', ctx.orgId, () => assertCan(db, ctx, 'user:read'));
     const userId = ctx.query.get('userId');
-    const rows = userId
-      ? db.prepare('SELECT * FROM grants WHERE org_id = ? AND user_id = ? ORDER BY created_at, id').all(ctx.orgId, userId)
-      : db.prepare('SELECT * FROM grants WHERE org_id = ? ORDER BY created_at, id').all(ctx.orgId);
-    send(res, 200, { grants: rows.map(grantJson) });
+    const filter = userId ? 'org_id = ? AND user_id = ?' : 'org_id = ?';
+    const args = userId ? [ctx.orgId, userId] : [ctx.orgId];
+    const rows = db.prepare(`SELECT * FROM grants WHERE ${filter} ORDER BY created_at, id`).all(...args);
+
+    // One query for every row's permissions, grouped here, instead of one query per grant.
+    // Measured before (BUILD-LOG phase 8): 2,009 queries for 2,003 grants.
+    const perms = new Map(rows.map((g) => [g.id, []]));
+    for (const r of db.prepare(
+      `SELECT grant_id, permission FROM grant_permissions
+        WHERE grant_id IN (SELECT id FROM grants WHERE ${filter}) ORDER BY grant_id, permission`
+    ).all(...args)) perms.get(r.grant_id)?.push(r.permission);
+
+    send(res, 200, { grants: rows.map((g) => grantJson(g, perms.get(g.id))) });
   });
 
   // Revoking an already-revoked grant is a 404: it is no longer visible.
@@ -224,6 +238,6 @@ export function registerDeviceRoutes(router, { db }) {
       bumpPermVersion(db, { orgId: ctx.orgId, userId: grant.user_id });
       audit(db, { orgId: ctx.orgId, actorId: ctx.userId, action: 'grant.revoke', targetType: 'grant', targetId: grant.id, result: 'allow', requestId: ctx.requestId });
     })();
-    send(res, 200, grantJson(db.prepare('SELECT * FROM grants WHERE id = ?').get(grant.id)));
+    send(res, 200, oneGrantJson(grant.id));
   });
 }
