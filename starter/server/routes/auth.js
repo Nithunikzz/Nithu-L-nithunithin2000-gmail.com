@@ -143,6 +143,9 @@ export function registerAuthRoutes(router, { db, secret }) {
     // set for entries that name no existing device, e.g. "Add device".
     const { permissions } = resolve(db, { userId: ctx.userId, orgId: ctx.orgId });
     const { permissions: orgWidePermissions } = resolveOrgWide(db, { userId: ctx.userId, orgId: ctx.orgId });
+    // The role catalogue, read from the table, so the console's role picker includes roles no
+    // document names. Labels and ranks only: what a role can do is never sent as a matrix.
+    const roles = db.prepare('SELECT key, label, rank FROM roles ORDER BY rank').all();
     send(res, 200, {
       user,
       orgId: ctx.orgId,
@@ -150,6 +153,22 @@ export function registerAuthRoutes(router, { db, secret }) {
       orgs: publicOrgs(orgsOf(db, ctx.userId)),
       permissions,
       orgWidePermissions,
+      roles,
     });
+  });
+
+  // Sign out: kill the whole refresh-token family behind the cookie and clear it. Without this
+  // a reload after "sign out" would silently sign the user back in from the cookie.
+  router.post('/v1/auth/logout', (ctx, _params, res) => {
+    const raw = readCookie(ctx.req, COOKIE);
+    if (raw) {
+      const row = db.prepare('SELECT family_id FROM refresh_tokens WHERE token_hash = ?').get(hashRefreshToken(raw));
+      if (row) {
+        db.prepare('UPDATE refresh_tokens SET revoked_at = ? WHERE family_id = ? AND revoked_at IS NULL')
+          .run(nowIso(), row.family_id);
+      }
+    }
+    res.setHeader('set-cookie', `${COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/v1/auth; Max-Age=0`);
+    send(res, 200, { signedOut: true });
   });
 }

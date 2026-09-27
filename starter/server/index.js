@@ -29,6 +29,7 @@ registerRoutes(router, { db, secret: SECRET });
 const PUBLIC_ROUTES = new Set([
   'POST /v1/auth/login',
   'POST /v1/auth/refresh',
+  'POST /v1/auth/logout',
   'GET /v1/invites/:token',
   'POST /v1/invites/:token/accept',
 ]);

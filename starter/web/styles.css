@@ -1,0 +1,101 @@
+:root {
+  --text: #1f2430;
+  --muted: #5b6270;
+  --line: #d9dde5;
+  --surface: #ffffff;
+  --danger: #b42318;
+  --accent: #1d4ed8;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f7f9; }
+h1, h2 { margin: 0 0 8px; }
+h2 { font-size: 1.15rem; }
+
+button {
+  font: inherit;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.danger { color: var(--danger); }
+button.subtle { border-color: transparent; color: var(--muted); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+input, select {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; color: var(--muted); }
+label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+
+.centered { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 20px;
+}
+.login { width: min(380px, 100%); display: flex; flex-direction: column; gap: 12px; }
+.login button[type='submit'] { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.error { color: var(--danger); background: #fef3f2; border: 1px solid #fecdca; border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.notice { color: #054f31; background: #ecfdf3; border: 1px solid #abefc6; border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.hint, .muted { color: var(--muted); font-size: 0.85rem; }
+.empty { color: var(--muted); }
+
+/* The shell's background comes from the org theme (inline style), so switching orgs visibly
+   changes the whole console. */
+.shell { min-height: 100vh; }
+.topbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  padding: 12px 20px;
+  background: var(--accent); color: #fff;
+}
+.topbar button { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: rgba(255, 255, 255, 0.35); }
+.topbar button.active { background: #fff; color: var(--accent); }
+.org-title { display: flex; align-items: baseline; gap: 8px; margin-right: auto; }
+.org-title strong { font-size: 1.1rem; }
+.role { opacity: 0.85; }
+.orgs { display: flex; flex-wrap: wrap; gap: 6px; }
+.who { opacity: 0.85; font-size: 0.9rem; }
+
+.body { display: grid; grid-template-columns: 180px 1fr; gap: 20px; padding: 20px; }
+.cards { display: flex; flex-direction: column; gap: 6px; }
+.cards button { text-align: left; }
+.cards button.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.content { min-width: 0; }
+
+.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.card-head h2 { margin: 0 auto 0 0; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.inline-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 12px; margin-bottom: 12px; border: 1px dashed var(--line); border-radius: 8px; }
+.grant-form fieldset { flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px; border: 1px solid var(--line); border-radius: 6px; }
+
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
+.pill.allow { background: #ecfdf3; color: #067647; }
+.pill.deny { background: #fef3f2; color: var(--danger); }
+.pager { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+
+@media (max-width: 720px) {
+  .body { grid-template-columns: 1fr; }
+  .cards { flex-direction: row; flex-wrap: wrap; }
+  table { display: block; overflow-x: auto; }
+}
