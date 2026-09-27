@@ -225,14 +225,15 @@ function Shell({ me, enter, onSignOut }) {
   const [error, setError] = useState(null);
   const current = visible.find((c) => c.key === view) ? view : visible[0]?.key ?? null;
 
-  // Switching mints a token for the other org. If ours has gone stale meanwhile, the
-  // refresh cookie can mint one for the target org directly.
+  // Switching mints a token for the other org. If ours can no longer be used — stale, or its
+  // org was just deleted (401 "not a member of this org") — the refresh cookie can mint one
+  // for the target org directly.
   const switchOrg = async (orgId) => {
     setError(null);
     try {
       let r;
       try { r = await auth.switchOrg(orgId); } catch (err) {
-        if (err.code !== 'TOKEN_STALE') throw err;
+        if (err.status !== 401) throw err;
         r = await auth.refresh(orgId);
       }
       await enter(r.token);
