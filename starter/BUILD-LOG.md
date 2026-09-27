@@ -426,6 +426,27 @@ Final: Playwright 25/25, API 66/66, JWT 43/43, permissions 35/35, personalisatio
 _What did you measure, what did you fix, and what did you deliberately leave alone? Anything you
 chose not to build belongs here with its reason._
 
+### 2026-09-27 — prediction before measuring anything
+
+Proposed with an AI assistant after reading how every route touches the DB; I reviewed each
+before committing. No hardening code yet. What the code shows: one shared connection; most
+routes call `db.prepare()` inside the handler (recompiled per request); each permission
+resolution (`loadInputs`) is 4 queries, plus 1 in `context.js`.
+
+1. `GET /devices` has no per-row queries: `resolveDevices` loads inputs once, so the count is
+   flat (~10) whether the org has 5 devices or 5,000.
+2. `GET /grants` is N+1: `grantJson()` runs one `grant_permissions` query per grant row.
+3. Permissions are resolved more than once per request: `POST /sessions` 3 times (visibility,
+   `assertCanStartSession`, `snapshotAuthority`), `PATCH /devices/:id` 3 times.
+4. At scale the cost is in memory, not queries: `decide()` scans every grant for every
+   permission for every device, so `GET /devices` is roughly devices x 20 x grants. Fine at seed
+   size; predict noticeably slow around 1,000 devices x 1,000 grants, with a flat query count.
+5. `/auth/me` grows with the number of devices that have their own grants (the org-level union
+   evaluates each one).
+6. Re-preparing statements per request is measurable but small next to 2 and 4.
+
+Real guesses: 4, 5, 6 (they need numbers). 2 is the concrete bug-shaped one.
+
 ## Open threads
 
 _Things you know are wrong, unfinished, or that you would do differently with another day. Listing
