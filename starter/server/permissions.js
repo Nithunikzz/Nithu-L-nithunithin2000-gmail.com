@@ -79,35 +79,78 @@ function loadInputs(db, { userId, orgId, now }) {
     covers: new Set(expand(r.pattern, catalogue)),
   }));
 
-  return { catalogue, membership, baseline, grants };
+  return { catalogue, membership, baseline, grants, index: indexGrants(grants) };
+}
+
+// Index the live grants once per resolution, so a decision is a lookup rather than a scan of
+// every grant. Measured before this existed (BUILD-LOG phase 8): a caller with 1,000 grants
+// took 1.28 s for GET /devices on 2,005 devices, all of it in scans, none in queries.
+//
+//   byPerm:    permission -> { deny, allow } -> { orgWide, byDevice: deviceId -> grant }
+//   devicePos: deviceId -> position of the first grant naming it
+//
+// Only the FIRST grant (in `grants` order, i.e. ORDER BY g.id) is kept per slot, with its
+// position, because that is the one a scan would have found — so the reported source is
+// unchanged, not just the effect.
+function indexGrants(grants) {
+  const byPerm = new Map();
+  const devicePos = new Map();
+  const slot = () => ({ orgWide: null, byDevice: new Map() });
+
+  grants.forEach((g, i) => {
+    if (g.deviceId !== null && !devicePos.has(g.deviceId)) devicePos.set(g.deviceId, i);
+    const entry = { g, i };
+    for (const p of g.covers) {
+      let e = byPerm.get(p);
+      if (!e) byPerm.set(p, (e = { deny: slot(), allow: slot() }));
+      const s = e[g.effect];
+      if (g.deviceId === null) s.orgWide ??= entry;
+      else if (!s.byDevice.has(g.deviceId)) s.byDevice.set(g.deviceId, entry);
+    }
+  });
+  return { byPerm, devicePos };
+}
+
+// The first grant in a slot that applies at `scope`: an org-wide one, or one on that device.
+function firstApplying(s, scope) {
+  const a = s.orgWide;
+  const b = scope === null ? undefined : s.byDevice.get(scope);
+  if (a && b) return (a.i < b.i ? a : b).g;
+  return (a ?? b)?.g ?? null;
 }
 
 // The one decision, for one permission at one scope. scope === null means "a device
 // with no device-scoped grants of its own": only org-wide grants apply.
 function decide(inputs, permission, scope) {
-  const { membership, baseline, grants } = inputs;
-  const applies = (g) => g.deviceId === null || g.deviceId === scope;
+  const { membership, baseline, index } = inputs;
+  const e = index.byPerm.get(permission);
 
   // D1: deny first, regardless of scope — an org-wide deny is never carved out.
-  const deny = grants.find((g) => g.effect === 'deny' && applies(g) && g.covers.has(permission));
+  const deny = e && firstApplying(e.deny, scope);
   if (deny) return decision('deny', `grant:${deny.id}`, 'explicit_deny');
 
   if (baseline.has(permission)) return decision('allow', `role:${membership.role}`, null);
 
-  const allow = grants.find((g) => g.effect === 'allow' && applies(g) && g.covers.has(permission));
+  const allow = e && firstApplying(e.allow, scope);
   if (allow) return decision('allow', `grant:${allow.id}`, null);
 
   return decision('deny', null, 'implicit'); // D4
 }
 
 // Org level is the union across devices (PERMISSIONS.md §3): allowed if the answer is
-// allow on at least one device. Only devices with their own grants can differ from the
-// plain org-wide answer, so those are the only ones worth evaluating.
+// allow on at least one device. When the plain org-wide answer is not allow, the only
+// devices that can turn it into allow are those with a device-scoped ALLOW for this
+// permission (a baseline allow would already have made the plain answer allow; an org-wide
+// deny applies to every device). They are tried in first-appearance order, the same order
+// as evaluating every device with a grant, so the same device and source win.
 function decideOrgLevel(inputs, permission) {
   const plain = decide(inputs, permission, null);
   if (plain.effect === 'allow') return plain;
-  const devices = [...new Set(inputs.grants.map((g) => g.deviceId).filter((d) => d !== null))];
-  for (const deviceId of devices) {
+  const e = inputs.index.byPerm.get(permission);
+  if (!e) return plain;
+  const { devicePos } = inputs.index;
+  const candidates = [...e.allow.byDevice.keys()].sort((a, b) => devicePos.get(a) - devicePos.get(b));
+  for (const deviceId of candidates) {
     const d = decide(inputs, permission, deviceId);
     if (d.effect === 'allow') return d;
   }
