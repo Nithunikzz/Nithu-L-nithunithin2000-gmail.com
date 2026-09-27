@@ -209,5 +209,20 @@ fail `check-personalisation.js`, and grading uses a different nonce anyway.
 
 ## Deliberately not built
 
-What you chose not to build, and the reason. A scope cut with a stated reason is a senior
-judgement. An unmentioned gap is a gap.
+- **No request-scoped permission cache.** Measured (BUILD-LOG phase 8): the routes that resolve
+  2-3 times per request (`PATCH /devices/:id`, `POST /sessions`) take about 1 ms at 2,005
+  devices / 2,003 grants. A cache adds state that has to be invalidated correctly, and a stale
+  cache is exactly the "serves authority that has gone stale" failure the README warns about,
+  for no measured gain. What would change this: a route where repeated resolution shows up in
+  the numbers.
+- **No startup-prepared statements everywhere.** 0.1-0.4 ms per request after the N+1 fix.
+- **No pagination on `GET /devices` or `GET /members`.** Query counts are flat and 2,005
+  devices take ~25 ms. The console contract counts rows on one page. Paginating would change
+  the response shape the tests read, for a size this exercise doesn't reach.
+- **No real remote access, file transfer or screen capture.** BRIEF.md §4 forbids it: sessions
+  are records. The `transfer-files` entry exists (gated by `device:file_transfer`) and says so.
+- **No email delivery, password reset or rate limiting.** Out of scope per README "Deliberately
+  not here". Invite links are returned once in the API response and shown once in the console.
+- **Failed logins are not audited.** `audit_events.org_id` is NOT NULL and a failed login
+  belongs to no org (BUILD-LOG phase 6). It would need a separate security log, which I didn't
+  build.

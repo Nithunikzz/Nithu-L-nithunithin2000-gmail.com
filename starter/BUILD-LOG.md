@@ -480,14 +480,67 @@ Plan from the numbers: fix 4/5 (index grants per resolution) first, then the 2 N
 re-measured. Leave 3 and 6 alone: about 1 ms and <= 0.5 ms don't justify caching or
 request-scoped state.
 
+### 2026-09-27 — fix 1: grant index (commit 29cca25)
+
+Where the 1.28 s went: `decide()` did two `grants.find()` scans per permission per device.
+For the viewer's list that's 2,005 devices x 20 permissions x ~2,000 grant rows, about 160M
+checks. Now `indexGrants()` runs once per resolution: permission -> deny/allow -> the
+org-wide grant, plus a map of device -> grant. It keeps only the *first* grant in the original
+`ORDER BY g.id` order, because that's the one a scan would have found. `decideOrgLevel()` only
+tries devices that have an allow for that permission, in the same first-appearance order.
+
+Same scaled DB, same driver: viewer `GET /devices` **1,279 -> 28.9 ms**, viewer `/auth/me`
+**376 -> 8.7 ms**, query counts unchanged (10, 12). Dana 26 -> 22 ms.
+
+"Faster" isn't the bar; "same answers" is. Evidence:
+- all suites green (permissions 35, personalisation 18, API 66, JWT 43);
+- differential run: the engine from `ac880ce` vs the new one, on the scaled DB plus 1,500
+  deliberately messy random grants (allow/deny, org-wide or per device, wildcards, expired,
+  not-yet-started, revoked, several per device). 995 comparisons over 16 users: org level,
+  44 device scopes, org-wide, the full 2,005-device list, `assertMayGrant` refusals. Every
+  field, including the source grant id, matched: **0 differences**;
+- checked the checker: I planted one bug in a copy (the later grant wins instead of the earlier)
+  and the same run reported **10 differences**. So the 0 means something.
+
+### 2026-09-27 — fix 2: `GET /grants` N+1 (commit 71f5b8d)
+
+`grantJson()` ran one `grant_permissions` query per row. Now the list route loads all of them in
+one query (same filter as the rows) and groups by grant id. Create and revoke keep a one-grant
+helper. With 2,003 grants: queries **2,009 -> 7**, prepared statements 2,009 -> 7, median
+**26 -> 9.7 ms**. It was a real N+1 but a modest cost, which matches the baseline.
+
+Captured the response bodies *before* changing anything, on the messy DB (3,503 grants,
+including revoked): all grants, `?userId=` viewer, sam, and a user with none. After the change
+all four were **byte-identical** (821,067 / 356,481 / 478 / 13 bytes). Suites green; Playwright
+25/25 (the Grants card reads this endpoint).
+
+### 2026-09-27 — deliberately left alone, with the numbers
+
+- Resolving permissions 2-3 times per request: `PATCH /devices/:id` 18 queries, `POST /sessions`
+  19, both about 1 ms at scale. A request-scoped cache would add state for no measured gain.
+- Statements prepared per request: 0.1-0.4 ms once the N+1 was gone. Moving every statement to
+  startup would touch every route for a sub-millisecond win.
+- Dana's `GET /devices` at 2,005 devices is ~22-25 ms, mostly building and serialising 2,005
+  rows with 20 permissions each. No pagination on the device list; see DECISIONS.md.
+
+Final, after both fixes: JWT 43/43, permissions 35/35, personalisation 18/18, API 66/66,
+Playwright 25/25. Measuring tool (preload + scaler + driver) lives outside the repo; its
+method is described above.
+
 ## Open threads
 
 _Things you know are wrong, unfinished, or that you would do differently with another day. Listing
 these honestly is worth more than pretending they do not exist — we will find them anyway._
 
-- **Duplicate device names are a check-then-insert race.** `routes/devices.js` checks
-  `nameTaken` and then inserts, and there is no unique index behind it (I can't edit
-  `schema.sql`). Two concurrent creates with the same name can both succeed. Not fixed.
+- **Duplicate device names: a theoretical cross-process race, not reproduced.** `routes/devices.js`
+  checks `nameTaken` and then inserts, the check runs before the write transaction, and there is
+  no unique index behind it (I can't edit `schema.sql`). Probe (Phase 8): 40 parallel creates of
+  one name -> exactly 1 x 201 and 39 x 409, both against one server process and spread over four
+  processes sharing one DB file. In one process it can't interleave: check and insert run
+  synchronously with no await between them. Across processes a window remains in principle, but
+  the probe didn't hit it, so I'm not calling it a bug and didn't change the transaction model
+  at the end. If multi-process writes became a real deployment, I'd move the check inside an
+  `.immediate()` write transaction, or add a constraint if the schema contract allowed it.
 - **Login with no active orgs** returns 200 with `token: null`. The user can't call anything
   org-scoped. Not decided whether that is right.
 - **`*` / `device:*` can't be granted** in an org with an undocumented permission (Phase 4).
