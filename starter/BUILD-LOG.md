@@ -383,6 +383,44 @@ builds the SPA first"). Chromium for Playwright isn't installed yet.
 
 Real guesses: 1, 3, 4, 6.
 
+### 2026-09-27 — console: what happened (commits 77be3b1, b9f0b7e)
+
+**1 was a real server bug, found before any UI code.** Probe on a throwaway server: owner
+grants Sam `device:provision` on `dev_lab_mac_01` only. Sam's org-level `device:provision`
+came back allow (the union), and `POST /devices` for a brand-new device returned **201**.
+Decommissioning a *different* device was already 403, so only actions that name no existing
+device leaked. Same pattern in three more places: receiving a transfer (target org), and
+creating or revoking an org-wide grant. Added `resolveOrgWide()`/`assertCanOrgWide()`
+(baseline + org-wide grants only) for those four; `/auth/me` also returns
+`orgWidePermissions` so the console can gate "Add device" on it. After: 403 for Sam, 201 for
+the owner, all API suites green. The Phase 2 union isn't wrong. It answers "allowed on at least
+one device", which is the right question for a nav card and the wrong one for an org-wide act.
+The engine now answers three questions, not two (DECISIONS.md).
+
+2 held, and was worse than predicted: with no `dist/` every test waits out the full 30 s
+timeout on the login field. I first wrote that `dist/` wasn't gitignored. Wrong: it is
+(`.gitignore` line 9), my check had looked at a path that didn't exist yet. The real repo issue
+was the `test` script not building, although the config says it does. Changed it to
+`vite build && playwright test`.
+
+Wrote the console (`web/`) with AI help. First full Playwright run after building: **25/25**.
+
+Checked the rest with a throwaway spec outside `tests/`:
+- 3: the org is in the URL (`/o/<orgId>`), so a reload on Globex stays on Globex. The shipped test
+  only reloads on Acme and would pass either way.
+- 4: revoking a grant takes the list from 3 rows to 2. My first version of this probe
+  "failed" with expected -1: it counted rows before the list had loaded (0). The page was right;
+  I fixed the probe, not the app.
+- 5: each card refetches on every visit (it is remounted by key), which is why the "server
+  withdraws the permission" test passes.
+- 6: an existing-account invite with the wrong password shows the server's own words ("this
+  email already has an account: sign in with its password to accept", UNAUTHENTICATED).
+- 7: an unknown theme gets a colour derived from its name.
+- Extra: sign-out now revokes the refresh cookie (`POST /auth/logout`). Without it, a reload
+  right after "sign out" would have signed the user straight back in from the cookie.
+
+Final: Playwright 25/25, API 66/66, JWT 43/43, permissions 35/35, personalisation 18/18.
+
 ## Phase 8 — hardening
 
 _What did you measure, what did you fix, and what did you deliberately leave alone? Anything you

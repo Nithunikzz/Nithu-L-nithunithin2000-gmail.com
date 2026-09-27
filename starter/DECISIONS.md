@@ -137,6 +137,40 @@ paging can skip or repeat rows when events arrive between pages, and I've accept
 
 ---
 
+### Org-level union is not org-wide authority
+
+**What I chose:** keep the org-level union (`resolve()` with no device) for nav presence, and use
+a stricter org-wide set (`resolveOrgWide()`, baseline + org-wide grants only) for the four
+actions that name no existing device: creating a device, receiving a transfer, and creating or
+revoking an org-wide grant.
+**Why:** Phase 7 prediction 1, reproduced before any UI code. With `device:provision` granted on
+`dev_lab_mac_01` only, Sam's `POST /devices` returned 201 before the fix (commit 77be3b1) and
+403 after. The owner still gets 201. This refines the Phase 2 union decision; it doesn't
+reverse it.
+**What I rejected:** hiding "Add device" in React only. The API would still have accepted the
+request, and hiding isn't enforcement. Also rejected: dropping the union entirely, which would
+hide a card from someone who genuinely can act on one device.
+**What would change my mind:** a spec statement that a device-scoped grant is meant to carry
+authority for org-wide actions.
+
+---
+
+### The active org lives in the URL
+
+**What I chose:** the console keeps the active org as `/o/<orgId>`, and on load asks
+`POST /auth/refresh` for a token scoped to it. If that 404s (no longer a member), it falls back
+to the default org.
+**Why:** nothing may go in localStorage/sessionStorage (`tests/ui.spec.js` "no token is
+persisted in web storage"), and the refresh cookie knows the user, not the org. Probe: switch
+to Globex, reload, and the shell is still `org_globex`. The URL is only a request; the server
+still decides.
+**What I rejected:** browser storage (forbidden); always resuming in the default org, which
+passes the shipped test (it only reloads on Acme) but loses the user's place.
+**What would change my mind:** a contract that says reload should always land on the default
+org, or that allows storage for non-secret UI state.
+
+---
+
 ## Where this repo argues with itself
 
 ### The seed loader and the fixture disagree about relative timestamps
