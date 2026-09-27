@@ -421,6 +421,45 @@ Checked the rest with a throwaway spec outside `tests/`:
 
 Final: Playwright 25/25, API 66/66, JWT 43/43, permissions 35/35, personalisation 18/18.
 
+### 2026-09-27 — clicking through every card: one real bug (commit 1661213)
+
+The shipped UI suite only touches part of the console, so I drove everything else in Chromium
+with a throwaway spec, on a throwaway DB (with AI help): every device action (including
+DEVICE_BUSY and a duplicate-name CONFLICT), sessions start/stop/terminate, the invite ->
+accept -> sign in as the new user -> role change -> suspend/reinstate -> remove chain,
+grant create/revoke and an already-expired grant, audit paging, org create/rename/delete,
+viewer / operator / auditor / reviewer views, a role change mid-session, error screens, and a
+390 px wide screen. No browser console errors.
+
+**Bug:** deleting the org you're in left the console on the deleted org with "not a member of
+this org". After the delete, `switchOrg` asked `POST /auth/token` for another org with the
+old token. That token's org no longer exists, so `context.js` correctly answers 401
+UNAUTHENTICATED. The console only fell back to the refresh cookie on TOKEN_STALE. Now it
+falls back on any 401. After: lands on another org, no error; all shipped suites still green.
+
+Four other failures on the way were mistakes in my own spec, not the app: a confirm dialog
+answered with `true`; expecting the invitee to see a login form on reload (the accept already
+set a refresh cookie, so reload signs them in); expecting no "Start a session" for the viewer
+(wrong, since the viewer holds `session:start` on `lab-mac-01`, so the org-level union shows
+it); and a "no error on the page" check tripped by the add-device form still showing its
+earlier CONFLICT.
+
+What the personalised `reviewer` showed in the console. It's the contract applied to a role the
+contract never mentions, so these are observations, not changes:
+- View buttons that always fail: `start-view` is gated on `device:view` alone (UI-INVENTORY §3),
+  and reviewer has `device:view` but no `session:start`, so every click gives
+  `missing_permission`. The same happens for the viewer everywhere except `lab-mac-01`. Hiding
+  them would break the documented gate.
+- reviewer holds `user:invite` and `user:remove` but not `user:read`, and the People card (where
+  Invite and Remove live) is gated on `user:read`. So the API accepts those actions but the
+  console offers no way to reach them.
+- `device:reboot` has no entry in the inventory, so no button exists for it anywhere, even on
+  the device where the grant allows it. The server's answer is right; the console just has no
+  button for a permission it was never told about.
+
+Left alone (cosmetic): the Actions column is clipped on a 390 px screen (the table scrolls
+inside the card, not the page); audit rows show user ids, not emails.
+
 ## Phase 8 — hardening
 
 _What did you measure, what did you fix, and what did you deliberately leave alone? Anything you
