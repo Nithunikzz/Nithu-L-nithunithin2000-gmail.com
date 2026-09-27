@@ -4,7 +4,7 @@
 // /auth/me for nav, each row's own `permissions` for row actions. There is no role-to-
 // permission table in web/. An element is rendered with data-state="unlocked" or not at all.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, auth, setAccessToken, clearAccessToken, setStaleHandler } from './api.js';
 import { Gate, ErrorNote, themeStyle, allowed } from './ui.jsx';
 import { DevicesCard, PeopleCard, GrantsCard, SessionsCard, AuditCard, AdminCard } from './cards.jsx';
