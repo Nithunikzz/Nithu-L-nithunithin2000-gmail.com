@@ -447,6 +447,39 @@ resolution (`loadInputs`) is 4 queries, plus 1 in `context.js`.
 
 Real guesses: 4, 5, 6 (they need numbers). 2 is the concrete bug-shaped one.
 
+### 2026-09-27 — baseline measurements (no code changed)
+
+Tool, kept outside the repo: a `node --import` preload that wraps better-sqlite3 to count
+statement executions and `prepare()` calls per HTTP request, plus a driver that hits each
+endpoint 7 times and takes the median. Seed DB vs a scaled copy: 2,005 devices, 305 Acme
+members, 2,003 grants, 1,000+ of them on `usr_acme_viewer`.
+
+| endpoint (caller)            | queries seed -> scaled | median ms seed -> scaled |
+|------------------------------|------------------------|--------------------------|
+| GET /auth/me (dana)          | 12 -> 12               | 1.3 -> 1.2               |
+| GET /auth/me (viewer)        | 12 -> 12               | 1.3 -> **376**           |
+| GET /devices (dana)          | 10 -> 10               | 0.9 -> 26                |
+| GET /devices (viewer)        | 10 -> 10               | 0.8 -> **1,279**         |
+| GET /grants (dana)           | 9 -> **2,009**         | 0.5 -> 26                |
+| GET /members, /sessions, /audit | 6-7 -> 6-7          | <= 1.6                   |
+| PATCH /devices/:id           | 18 -> 18               | 0.8 -> 1.4               |
+| POST /sessions               | 19 -> 19               | 0.9 -> 1.0               |
+
+- 1 confirmed: `GET /devices` stays at 10 queries at 2,005 devices.
+- 2 confirmed: `GET /grants` is 5 + 1 per grant. But only 26 ms: SQLite in-process is cheap
+  per query. Real, but not the biggest problem.
+- 3: repeated resolution is visible in the counts (18-19 queries), but costs about 1 ms.
+- 4 confirmed, and it's the real cost: same 10 queries, 1.28 s for a caller with 1,000
+  grants vs 26 ms for Dana. Time follows the *caller's* grant count x devices x permissions,
+  not the database.
+- 5 confirmed: `/auth/me` 376 ms for the grant-heavy viewer vs 1.2 ms for Dana.
+- 6: statement preparation is 0.1-0.5 ms per request, except 9 of the 26 ms in `GET /grants`
+  (the N+1 re-prepares each time).
+
+Plan from the numbers: fix 4/5 (index grants per resolution) first, then the 2 N+1, each
+re-measured. Leave 3 and 6 alone: about 1 ms and <= 0.5 ms don't justify caching or
+request-scoped state.
+
 ## Open threads
 
 _Things you know are wrong, unfinished, or that you would do differently with another day. Listing
